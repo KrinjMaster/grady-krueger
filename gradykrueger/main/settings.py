@@ -1,9 +1,12 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+load_dotenv(os.path.join(BASE_DIR, "../.env"))
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-lm6=6$1qb3q1o7p6qt!d37(avwc$s7x_rnv1jul%_#d%ie&&de"
@@ -14,12 +17,10 @@ DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 # HTTP TOKEN
-BOT_TOKEN = os.environ.get(
-    "BOT_TOKEN", "7540054646:AAFJlxaqkp_2a4QzbmCyq2WlQvz9lJMrVGU"
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # WEBOOK STATUS
-BOT_USE_WEBHOOK = os.environ.get("BOT_USE_WEBHOOK", False)
+BOT_USE_WEBHOOK = os.getenv("BOT_USE_WEBHOOK")
 
 # Application definition
 
