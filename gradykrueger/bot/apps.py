@@ -4,8 +4,6 @@ from django.apps import AppConfig
 from django.conf import settings
 from django.urls import reverse
 
-public_url = getattr(settings, "DOMAIN", "???")
-
 
 class GradyKruegerConfig(AppConfig):
     name = "gradykrueger.bot"
@@ -21,9 +19,9 @@ class GradyKruegerConfig(AppConfig):
             # Using webhook
             bot.delete_webhook()
             time.sleep(1)
-            public_url = "https://" + public_url + reverse("??")
-            print(public_url)
-            bot.set_webhook(public_url)
+            # public_url = "https://" + public_url + reverse("gradykrueger_hook")
+            # print(public_url)
+            # bot.set_webhook(public_url)
 
         else:
             print("Bot started in polling mode")

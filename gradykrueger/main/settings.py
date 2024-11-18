@@ -17,7 +17,10 @@ ALLOWED_HOSTS = ["*"]
 BOT_TOKEN = os.environ.get(
     "BOT_TOKEN", "7540054646:AAFJlxaqkp_2a4QzbmCyq2WlQvz9lJMrVGU"
 )
+
+# WEBOOK STATUS
 BOT_USE_WEBHOOK = os.environ.get("BOT_USE_WEBHOOK", False)
+
 # Application definition
 
 INSTALLED_APPS = [

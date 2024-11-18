@@ -1,7 +1,6 @@
 import time
 
 import telebot
-
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
@@ -17,10 +16,11 @@ def handler(request):
 
         json_data = request.body.decode("utf-8")
         update = telebot.types.Update.de_json(json_data)
-        tbot.process_new_updates([update])
 
-        return HttpResponse("")
+        if update is not None:
+            tbot.process_new_updates([update])
 
+            return HttpResponse(content=b"")
     else:
         raise PermissionDenied
 
@@ -29,9 +29,11 @@ def handler(request):
 def register(request):
     from .bot import bot as tbot
 
-    public_url = getattr(settings, "DOMAIN", "??")
+    CERTIFICATE = join(settings.BASE_DIR, "PUBLIC.pem")
+
+    public_url = settings.DEV_DOMAIN
     tbot.delete_webhook()
     time.sleep(1)
-    public_url = "https://" + public_url + reverse("??")
-    tbot.set_webhook(public_url)
+    public_url = "http://" + public_url + reverse("gradykrueger_hook")
+    tbot.set_webhook(public_url, certificate=CERTIFICATE)
     return HttpResponse(public_url)
