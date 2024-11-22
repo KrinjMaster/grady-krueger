@@ -10,36 +10,43 @@ from PIL import Image, ImageDraw, ImageFont
 font_path = os.path.join(settings.BASE_DIR.__str__() + "/bot/fonts/Arial Unicode.ttf")
 
 
+# func to proccess image and return all of the answers circle countors and transformed image of test sheet
 def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike]:
+    # basic image manipulation
     gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     blurred = cv.GaussianBlur(gray, (5, 5), 0)
     edged = cv.Canny(blurred, 5, 100)
 
+    # countors
     cnts, _ = cv.findContours(edged.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     cv.drawContours(edged, cnts, -1, (255, 255, 255), 3)
     cnts, _ = cv.findContours(edged.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-    countour = None
+    countor = None
     max_perimeter = 0
 
+    # determining countor of a sheet of paper
     for c in cnts:
         perimeter = cv.arcLength(c, True)
         approx = cv.approxPolyDP(c, 0.04 * perimeter, True)
 
         if len(approx) == 4 and max_perimeter < perimeter:
             max_perimeter = perimeter
-            countour = approx
+            countor = approx
 
-    assert countour is not None, "No paper found!"
+    assert countor is not None, "No paper found!"
 
-    transformed = perspective.four_point_transform(image, countour.reshape(4, 2))
+    # four point transformation
+    transformed = perspective.four_point_transform(image, countor.reshape(4, 2))
     transformed_gray = cv.cvtColor(transformed, cv.COLOR_BGR2GRAY)
     transformed_blurred = cv.GaussianBlur(transformed_gray, (9, 5), 0)
 
+    # to black and white
     threshold = np.average(transformed_blurred)
 
     _, thresh = cv.threshold(transformed_blurred, threshold, 255, cv.THRESH_BINARY)
 
+    # contors again
     paper_cnts, paper_hier = cv.findContours(
         thresh.copy(), cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE
     )
@@ -47,22 +54,27 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
     filtered_cnts = []
 
     threshold = 0
+    most_occuring_count = 0
 
     occurence_frequency = {}
 
+    # get the most occuring outer contor
     for i in range(len(paper_hier)):
         if occurence_frequency.get(paper_hier[:, i][0][3]) is not None:
             occurence_frequency[paper_hier[:, i][0][3]] += 1
         else:
             occurence_frequency[paper_hier[:, i][0][3]] = 0
 
-        if occurence_frequency[paper_hier[:, i][0][3]] > 0:
+        if occurence_frequency[paper_hier[:, i][0][3]] > most_occuring_count:
             threshold = paper_hier[:, i][0][3]
+            most_occuring_count = occurence_frequency[paper_hier[:, i][0][3]]
 
+    # get all of the outer contors
     for index in range(len(paper_cnts)):
         if paper_hier[:, index][0][3] > threshold - 1:
             filtered_cnts.append(paper_cnts[index])
 
+    # define answer question radius
     row_spacing = 10
     columns_spacing = max(210 / columns, 35)
     circle_spacing = 25
@@ -81,13 +93,14 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
         font=font_nums,
     )
 
-    circle_offset = (width - (length + circle_spacing * (n - 1))) / (2 * n)
+    circle_radius = (width - (length + circle_spacing * (n - 1))) / (2 * n)
 
-    if 2 * circle_offset > height:
-        circle_offset = height / 2
+    if 2 * circle_radius > height:
+        circle_radius = height / 2
 
     question_cnts = []
 
+    # filter to keep only the answer circles contors
     for i in range(len(filtered_cnts)):
         c = filtered_cnts[i]
         M = cv.moments(c)
@@ -95,14 +108,15 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
         ar = w / float(h)
 
         if (
-            w >= circle_offset / 2
-            and h >= circle_offset / 2
+            w >= circle_radius / 2
+            and h >= circle_radius / 2
             and ar >= 0.9
             and ar <= 1.1
             and M["m00"] != 0
         ):
             question_cnts.append(c)
 
+    # sort answer circles from top-to-bottom left-to-right
     question_cnts = sorted(
         question_cnts,
         key=lambda ctr: cv.boundingRect(ctr)[0] * 450
@@ -111,6 +125,7 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
 
     assert rows * columns * n == len(question_cnts), "Wrong number of questions found!"
 
+    # iterate and group circle contors by questions
     answers_by_groups = []
 
     cur_row = 0
@@ -135,24 +150,16 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
             cur_row = 0
             factor += 1
 
-    # cv.imshow("Blurred", blurred)
-    # cv.imshow("Gray", gray)
-    # cv.imshow("Image", image)
-    # cv.imshow("Edged", edged)
-    # cv.imshow("thresh Edged", thresh_edged)
-    # cv.imshow("Threshold", thresh)
-    # cv.imshow("Transformed", transformed)
-    # cv.waitKey(0)
-    # cv.destroyAllWindows()
-
     return (answers_by_groups, thresh, transformed)
 
 
+# defines correct answer for the test
 def define_correct_answers(
     answers_by_groups, thresh, transformed, rows, columns, n
 ) -> tuple[MatLike, list[int]]:
     correct_answers = []
 
+    # iterate over contours, check if content inside is filled or not (black and white ratio)
     for group_i in range(rows * columns):
         marked_answer = 0
 
@@ -178,6 +185,7 @@ def define_correct_answers(
     return (transformed, correct_answers)
 
 
+# check the test occording to given answers
 def check_answers(
     thresh,
     transformed,
@@ -192,6 +200,7 @@ def check_answers(
     partially_correct_answers_count = 0
     wrong_answers_count = 0
 
+    # this loop only for drawing correct, incorrect and partially correct answers contors
     for group_i in range(rows * columns):
         marked_answer = 0
 
@@ -228,6 +237,7 @@ def check_answers(
                     transformed, [answers_by_groups[group_i][cnt_i]], -1, (255, 0, 0), 5
                 )
 
+            # on last contor in the group check answered circles
             if cnt_i == n - 1:
                 if correct_answers[group_i] & marked_answer != 0 and marked_answer != 0:
                     if (
@@ -258,6 +268,7 @@ def check_answers(
                 else:
                     wrong_answers_count += 1
 
+    # drawing results on the sheet of paper
     font = cv.FONT_ITALIC
 
     (x, y, w, h) = cv.boundingRect(thresh)
@@ -303,6 +314,7 @@ def check_answers(
 
 
 def create_test_template(columns, rows, n):
+    # create russian alphabet
     a = ord("а")
     alphabet = (
         [chr(i).upper() for i in range(a, a + 6)]
@@ -310,14 +322,18 @@ def create_test_template(columns, rows, n):
         + [chr(i).upper() for i in range(a + 6, a + 32)]
     )
 
+    # equal to A4 piece of paper
     result = np.zeros([3507, 2481, 3], dtype=np.uint8)
 
+    # underlining next to name and class text
     result.fill(255)
     result[200:205, 350:1500] = 0
     result[200:205, 1850:2100] = 0
 
+    # frame
     cv.rectangle(result, (35, 35), (2446, 3472), 0, 20)
 
+    # placing circles and answer number
     row_spacing = 20
     columns_spacing = max(210 / columns, 35)
     circle_spacing = 25
@@ -339,12 +355,12 @@ def create_test_template(columns, rows, n):
         str(columns * rows),
         font=font_nums,
     )
-    circle_offset = (width - (length + circle_spacing * (n - 1))) / (2 * n)
+    circle_radius = (width - (length + circle_spacing * (n - 1))) / (2 * n)
 
-    if 2 * circle_offset > height:
-        circle_offset = height / 2
+    if 2 * circle_radius > height:
+        circle_radius = height / 2
 
-    font_circle_letters = ImageFont.truetype(font_path, circle_offset)
+    font_circle_letters = ImageFont.truetype(font_path, circle_radius)
 
     for col_count in range(columns):
         for row_count in range(rows):
@@ -355,16 +371,16 @@ def create_test_template(columns, rows, n):
                         + length
                         + width * col_count
                         + columns_spacing * col_count
-                        + circle_offset * ((i + 1) * 2 - 1)
+                        + circle_radius * ((i + 1) * 2 - 1)
                         + circle_spacing * i,
                         offset_y
                         + height * row_count
                         + row_spacing * row_count
                         + height / 2,
                     ),
-                    int(circle_offset),
+                    int(circle_radius),
                     outline=(0),
-                    width=int(circle_offset * 0.10),
+                    width=int(circle_radius * 0.10),
                 )
 
                 draw.text(
@@ -373,7 +389,7 @@ def create_test_template(columns, rows, n):
                         + length
                         + width * col_count
                         + columns_spacing * col_count
-                        + circle_offset * ((i + 1) * 2 - 1)
+                        + circle_radius * ((i + 1) * 2 - 1)
                         + circle_spacing * i,
                         offset_y
                         + height * row_count

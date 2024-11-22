@@ -20,7 +20,7 @@ ALLOWED_HOSTS = ["*"]
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # WEBOOK STATUS
-BOT_USE_WEBHOOK = os.getenv("BOT_USE_WEBHOOK")
+BOT_USE_WEBHOOK = os.getenv("BOT_USE_WEBHOOK") == "True"
 
 # Application definition
 
