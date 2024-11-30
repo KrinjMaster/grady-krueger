@@ -10,8 +10,56 @@ from PIL import Image, ImageDraw, ImageFont
 font_path = os.path.join(settings.BASE_DIR.__str__() + "/bot/fonts/Arial Unicode.ttf")
 
 
+# paper test config
+class Test_Config:
+    is_multiple_answer: bool | None = None
+    columns: int | None = None
+    rows: int | None = None
+    n: int | None = None
+    correct_answers = []
+
+    def __init__(self, is_multiple_answer=None, columns=None, rows=None, n=None):
+        if is_multiple_answer:
+            self.is_multiple_answer = is_multiple_answer
+        if columns:
+            self.columns = columns
+        if rows:
+            self.rows = rows
+        if n:
+            self.n = n
+
+    def set_multiple_answer(self, is_multiple_answer):
+        self.is_multiple_answer = is_multiple_answer
+
+    def set_columns(self, columns):
+        self.columns = columns
+
+    def set_rows(self, rows):
+        self.rows = rows
+
+    def set_n(self, n):
+        self.n = n
+
+    def set_correct_answers(self, answers):
+        self.correct_answers = answers
+
+    def clear(self):
+        self.n = None
+        self.rows = None
+        self.is_multiple_answer = None
+        self.columns = None
+
+
 # func to proccess image and return all of the answers circle countors and transformed image of test sheet
-def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike]:
+def proccess_image(
+    image, test_config: Test_Config
+) -> tuple[list[int], MatLike, MatLike]:
+    if test_config.rows is None or test_config.columns is None or test_config.n is None:
+        # TODO
+        raise Exception("")
+
+    image = cv.resize(image, (905, 1280))
+
     # basic image manipulation
     gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     blurred = cv.GaussianBlur(gray, (5, 5), 0)
@@ -76,24 +124,28 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
 
     # define answer question radius
     row_spacing = 10
-    columns_spacing = max(210 / columns, 35)
+    columns_spacing = max(210 / test_config.columns, 35)
     circle_spacing = 25
 
-    width = (2337 - columns_spacing * columns) // columns
-    height = (3107 - rows * row_spacing) // rows
+    width = (2337 - columns_spacing * test_config.columns) // test_config.columns
+    height = (3107 - test_config.rows * row_spacing) // test_config.rows
 
-    font_nums = ImageFont.truetype(font_path, max(height / (columns + 1), 50))
+    font_nums = ImageFont.truetype(
+        font_path, max(height / (test_config.columns + 1), 50)
+    )
 
     pil_img = Image.fromarray(transformed)
 
     draw = ImageDraw.Draw(pil_img)
 
     length = draw.textlength(
-        str(columns * rows),
+        str(test_config.columns * test_config.n),
         font=font_nums,
     )
 
-    circle_radius = (width - (length + circle_spacing * (n - 1))) / (2 * n)
+    circle_radius = (width - (length + circle_spacing * (test_config.n - 1))) / (
+        2 * test_config.n
+    )
 
     if 2 * circle_radius > height:
         circle_radius = height / 2
@@ -107,9 +159,12 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
         (_, _, w, h) = cv.boundingRect(c)
         ar = w / float(h)
 
+        # print(w, h, circle_radius / 2, circle_radius * 0.8, ar)
         if (
             w >= circle_radius / 2
             and h >= circle_radius / 2
+            and w <= circle_radius * 0.8
+            and h <= circle_radius * 0.8
             and ar >= 0.9
             and ar <= 1.1
             and M["m00"] != 0
@@ -123,7 +178,11 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
         + cv.boundingRect(ctr)[1] * image.shape[1],
     )
 
-    assert rows * columns * n == len(question_cnts), "Wrong number of questions found!"
+    # print(len(question_cnts), "length")
+
+    assert test_config.rows * test_config.columns * test_config.n == len(
+        question_cnts
+    ), "Wrong number of questions found!"
 
     # iterate and group circle contors by questions
     answers_by_groups = []
@@ -134,8 +193,12 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
     cur_group = []
 
     for i in range(len(question_cnts) + 1):
-        if cur_row <= rows - 1:
-            cur_group.append(question_cnts[columns * n * cur_row + cur_n + factor * 3])
+        if cur_row <= test_config.rows - 1:
+            cur_group.append(
+                question_cnts[
+                    test_config.columns * test_config.n * cur_row + cur_n + factor * 3
+                ]
+            )
 
             if cur_n + 1 == 3:
                 answers_by_groups.append(cur_group)
@@ -155,22 +218,26 @@ def proccess_image(image, rows, columns, n) -> tuple[list[int], MatLike, MatLike
 
 # defines correct answer for the test
 def define_correct_answers(
-    answers_by_groups, thresh, transformed, rows, columns, n
+    answers_by_groups, thresh, transformed, test_config: Test_Config
 ) -> tuple[MatLike, list[int]]:
+    if test_config.rows is None or test_config.columns is None or test_config.n is None:
+        # TODO
+        raise Exception("")
+
     correct_answers = []
 
     # iterate over contours, check if content inside is filled or not (black and white ratio)
-    for group_i in range(rows * columns):
+    for group_i in range(test_config.rows * test_config.columns):
         marked_answer = 0
 
-        for cnt_i in range(n):
+        for cnt_i in range(test_config.n):
             x, y, w, h = cv.boundingRect(answers_by_groups[group_i][cnt_i])
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
 
             if bw_ratio < 2.25:
                 # circle is marked
-                marked_answer |= 1 << (n - 1 - cnt_i)
+                marked_answer |= 1 << (test_config.n - 1 - cnt_i)
 
                 cv.drawContours(
                     transformed,
@@ -190,30 +257,39 @@ def check_answers(
     thresh,
     transformed,
     answers_by_groups,
-    correct_answers,
-    rows,
-    columns,
-    n,
-    is_multiple_answers,
+    test_config,
 ) -> tuple[int, int, int, MatLike]:
+    if (
+        test_config.rows is None
+        or test_config.columns is None
+        or test_config.n is None
+        or test_config.is_multiple_answer is None
+    ):
+        # TODO
+        raise Exception("")
+
     correct_answers_count = 0
     partially_correct_answers_count = 0
     wrong_answers_count = 0
 
     # this loop only for drawing correct, incorrect and partially correct answers contors
-    for group_i in range(rows * columns):
+    for group_i in range(test_config.rows * test_config.columns):
         marked_answer = 0
 
-        for cnt_i in range(n):
+        for cnt_i in range(test_config.n):
             x, y, w, h = cv.boundingRect(answers_by_groups[group_i][cnt_i])
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
 
             if bw_ratio < 2.1:
                 # circle is marked
-                marked_answer |= 1 << (n - 1 - cnt_i)
+                marked_answer |= 1 << (test_config.n - 1 - cnt_i)
 
-                if 1 << (n - 1 - cnt_i) & correct_answers[group_i] != 0:
+                if (
+                    1 << (test_config.n - 1 - cnt_i)
+                    & test_config.correct_answers[group_i]
+                    != 0
+                ):
                     # circle is marked correctly
                     cv.drawContours(
                         transformed,
@@ -231,35 +307,49 @@ def check_answers(
                         (0, 0, 255),
                         5,
                     )
-            elif 1 << (n - 1 - cnt_i) & correct_answers[group_i] != 0:
+            elif (
+                1 << (test_config.n - 1 - cnt_i) & test_config.correct_answers[group_i]
+                != 0
+            ):
                 # circle is not marked, but correct
                 cv.drawContours(
                     transformed, [answers_by_groups[group_i][cnt_i]], -1, (255, 0, 0), 5
                 )
 
             # on last contor in the group check answered circles
-            if cnt_i == n - 1:
-                if correct_answers[group_i] & marked_answer != 0 and marked_answer != 0:
+            if cnt_i == test_config.n - 1:
+                if (
+                    test_config.correct_answers[group_i] & marked_answer != 0
+                    and marked_answer != 0
+                ):
+                    print(
+                        test_config.correct_answers[group_i] & marked_answer,
+                        test_config.correct_answers[group_i],
+                        marked_answer.bit_count(),
+                        test_config.correct_answers[group_i].bit_count(),
+                    )
                     if (
-                        correct_answers[group_i] & marked_answer
-                        == correct_answers[group_i]
+                        test_config.correct_answers[group_i] & marked_answer
+                        == test_config.correct_answers[group_i]
                         and marked_answer.bit_count()
-                        == correct_answers[group_i].bit_count()
+                        == test_config.correct_answers[group_i].bit_count()
                     ):
                         # all answers are correct
                         correct_answers_count += 1
                     elif (
                         (
-                            (correct_answers[group_i] & marked_answer)
-                            ^ correct_answers[group_i]
+                            (test_config.correct_answers[group_i] & marked_answer)
+                            ^ test_config.correct_answers[group_i]
                         ).bit_count()
                         == 1
                         or (
-                            (correct_answers[group_i] & marked_answer) ^ marked_answer
+                            (test_config.correct_answers[group_i] & marked_answer)
+                            ^ marked_answer
                         ).bit_count()
                         == 1
                     ) and (
-                        correct_answers[group_i].bit_count() > 1 and is_multiple_answers
+                        test_config.correct_answers[group_i].bit_count() > 1
+                        and test_config.is_multiple_answer
                     ):
                         # only one answer is missing, if only multiple answers are possible and there is more than one correct answer
                         partially_correct_answers_count += 1
@@ -267,43 +357,6 @@ def check_answers(
                         wrong_answers_count += 1
                 else:
                     wrong_answers_count += 1
-
-    # drawing results on the sheet of paper
-    font = cv.FONT_ITALIC
-
-    (x, y, w, h) = cv.boundingRect(thresh)
-
-    pil_img = Image.fromarray(transformed)
-
-    font = ImageFont.truetype(font_path, 45)
-    draw = ImageDraw.Draw(pil_img)
-
-    draw.text((50, h - 220), "Правильные: " + str(correct_answers_count), font=font)
-    draw.text(
-        (50, h - 160),
-        "Частично правильные: " + str(partially_correct_answers_count),
-        font=font,
-    )
-    draw.text((50, h - 100), "Неправильные: " + str(wrong_answers_count), font=font)
-    draw.text(
-        (750, h - 160),
-        "Результат: "
-        + str(correct_answers_count + 0.5 * partially_correct_answers_count)
-        + "/"
-        + str(columns * rows),
-        font=font,
-    )
-
-    draw.text((w - 350, h - 220), "Правильные", fill=(0, 255, 0), font=font)
-    draw.text(
-        (w - 350, h - 160),
-        "Пропущенные",
-        fill=(255, 0, 0),
-        font=font,
-    )
-    draw.text((w - 350, h - 100), "Неправильныe", fill=(0, 0, 255), font=font)
-
-    transformed = np.asarray(pil_img)
 
     return (
         correct_answers_count,
@@ -313,7 +366,10 @@ def check_answers(
     )
 
 
-def create_test_template(columns, rows, n):
+def create_test_template(test_config: Test_Config):
+    if test_config.rows is None or test_config.columns is None or test_config.n is None:
+        # TODO
+        raise Exception("")
     # create russian alphabet
     a = ord("а")
     alphabet = (
@@ -335,36 +391,40 @@ def create_test_template(columns, rows, n):
 
     # placing circles and answer number
     row_spacing = 20
-    columns_spacing = max(210 / columns, 35)
+    columns_spacing = max(210 / test_config.columns, 35)
     circle_spacing = 25
 
     offset_x = 90
     offset_y = 300
 
-    width = (2337 - columns_spacing * columns) // columns
-    height = (3107 - rows * row_spacing) // rows
+    width = (2337 - columns_spacing * test_config.columns) // test_config.columns
+    height = (3107 - test_config.rows * row_spacing) // test_config.rows
 
     font = ImageFont.truetype(font_path, 80)
-    font_nums = ImageFont.truetype(font_path, max(height / (columns + 1), 50))
+    font_nums = ImageFont.truetype(
+        font_path, max(height / (test_config.columns + 1), 50)
+    )
 
     pil_img = Image.fromarray(result)
 
     draw = ImageDraw.Draw(pil_img)
 
     length = draw.textlength(
-        str(columns * rows),
+        str(test_config.columns * test_config.rows),
         font=font_nums,
     )
-    circle_radius = (width - (length + circle_spacing * (n - 1))) / (2 * n)
+    circle_radius = (width - (length + circle_spacing * (test_config.n - 1))) / (
+        2 * test_config.n
+    )
 
     if 2 * circle_radius > height:
         circle_radius = height / 2
 
     font_circle_letters = ImageFont.truetype(font_path, circle_radius)
 
-    for col_count in range(columns):
-        for row_count in range(rows):
-            for i in range(n):
+    for col_count in range(test_config.columns):
+        for row_count in range(test_config.rows):
+            for i in range(test_config.n):
                 draw.circle(
                     (
                         offset_x
@@ -413,7 +473,7 @@ def create_test_template(columns, rows, n):
                     + row_spacing * row_count
                     + height / 2,
                 ),
-                str(col_count * rows + row_count + 1),
+                str(col_count * test_config.rows + row_count + 1),
                 fill=(0),
                 anchor="mm",
                 font=font_nums,

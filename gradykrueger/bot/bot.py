@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import cv2 as cv
@@ -26,33 +27,7 @@ bot.set_my_commands(
 )
 
 
-# paper test config
-class Config:
-    is_multiple_answer = None
-    columns = None
-    rows = None
-    n = None
-
-    def set_multiple_answer(self, is_multiple_answer):
-        self.is_multiple_answer = is_multiple_answer
-
-    def set_columns(self, columns):
-        self.columns = columns
-
-    def set_rows(self, rows):
-        self.rows = rows
-
-    def set_n(self, n):
-        self.n = n
-
-    def clear(self):
-        self.n = None
-        self.rows = None
-        self.is_multiple_answer = None
-        self.columns = None
-
-
-test_config = Config()
+test_config = Test_Config()
 
 
 # message handlers
@@ -147,9 +122,8 @@ def choose_answers_quantity(
         # if is_multiple_answer is None, then user is creating test template and not checking tests
         if test_config.is_multiple_answer is None:
             try:
-                test_template = create_test_template(
-                    test_config.columns, test_config.rows, test_config.n
-                )
+                test_template = create_test_template(test_config)
+
                 cv.imwrite(imgs_path + "test_template.jpg", test_template)
 
                 bot.send_photo(
@@ -157,12 +131,13 @@ def choose_answers_quantity(
                     open(imgs_path + "test_template.jpg", "rb"),
                     "Вот ваш шаблон для тестов!",
                 )
-            except:
+
+            except cv.error as error:
                 bot.send_message(
                     message.chat.id,
                     "Во время генерации шаблона произошла ошибка! Попробуйте создать его снова.",
                 )
-                print("Something went wrong during creating template!")
+                print("Something went wrong during creating template!", error)
 
             if Path(os.path.join(imgs_path + "test_template.jpg")).is_file():
                 os.remove(imgs_path + "test_template.jpg")
@@ -201,22 +176,16 @@ def proccess_correct_answers(message: Message):
             answers_image = cv.imread(imgs_path + "test_correct_received.jpg")
 
             (answers_by_groups, answers_thresh, answers_transformed) = proccess_image(
-                answers_image,
-                test_config.rows,
-                test_config.columns,
-                test_config.n,
+                answers_image, test_config
             )
 
-            (transformed_correct, _) = define_correct_answers(
-                answers_by_groups,
-                answers_thresh,
-                answers_transformed,
-                test_config.rows,
-                test_config.columns,
-                test_config.n,
+            (transformed_correct, correct_answers) = define_correct_answers(
+                answers_by_groups, answers_thresh, answers_transformed, test_config
             )
 
             cv.imwrite(imgs_path + "test_correct.jpg", transformed_correct)
+
+            test_config.set_correct_answers(correct_answers)
 
             msg = bot.send_photo(
                 message.chat.id,
@@ -254,7 +223,7 @@ def confirm_test_answers(message: Message):
     if str(message.text).lower() == "да":
         msg = bot.send_message(
             message.chat.id,
-            "Пришлите сюда фотографии заполненных тестов, которые нужно проверить !",
+            "Пришлите сюда фотографии заполненных тестов по одному !",
         )
 
         bot.register_next_step_handler(msg, check_tests)
@@ -278,22 +247,62 @@ def confirm_test_answers(message: Message):
 
 
 def check_tests(message: Message):
-    if message.photo is not None:
-        # interate over all received photos
-        for photo in message.photo[1:]:
-            try:
-                file_id = photo.file_id
-                file_info = bot.get_file(file_id)
-                downloaded_file = bot.download_file(file_info.file_path)
+    if (
+        message.photo is not None
+        and test_config.rows is not None
+        and test_config.columns is not None
+    ):
+        try:
+            if len(test_config.correct_answers) > 0:
+                file_info = bot.get_file(message.photo[-1].file_id)
+                file = bot.download_file(file_info.file_path)
 
                 f = open(imgs_path + "test_marked_received.jpg", "wb")
-                f.write(downloaded_file)
+                f.write(file)
 
                 marked_answers_image = cv.imread(imgs_path + "test_marked_received.jpg")
-            except:
-                print("Photo could not be proccessed!")
 
-        test_config.clear()
+                (
+                    marked_answers_by_groups,
+                    marked_answered_thresh,
+                    marked_answered_transformed,
+                ) = proccess_image(marked_answers_image, test_config)
+
+                (
+                    correct_answers_count,
+                    partially_correct_answers_count,
+                    wrong_answers_count,
+                    checked_transformed,
+                ) = check_answers(
+                    marked_answered_thresh,
+                    marked_answered_transformed,
+                    marked_answers_by_groups,
+                    test_config,
+                )
+
+                cv.imwrite(imgs_path + "test_checked.jpg", checked_transformed)
+
+                bot.send_photo(
+                    message.chat.id,
+                    open(imgs_path + "test_checked.jpg", "rb"),
+                    f"Вот проверенный тест!\nВсего правильных баллов: {correct_answers_count + partially_correct_answers_count * 0.5}/{test_config.columns * test_config.rows}\nКоличество полностью правильных ответов: {correct_answers_count}\nКоличество частисно правильных ответов: {partially_correct_answers_count}\nКоличество неправильных ответов: {wrong_answers_count}\nЗелёным отмечены те ответы, которые были отвечены правильно. Синим отмечены те ответы, которые являются правильными, но ученик пропустил. Красным отмечены ответы, которые ученик отметил неправильно.",
+                )
+
+                if Path(os.path.join(imgs_path + "test_checked.jpg")).is_file():
+                    os.remove(imgs_path + "test_checked.jpg")
+
+                if Path(os.path.join(imgs_path + "test_marked_received.jpg")).is_file():
+                    os.remove(imgs_path + "test_marked_received.jpg")
+
+                msg = bot.send_message(
+                    message.chat.id,
+                    "Вы хотите отправить ещё фотографии тестов ? (Да/Нет)",
+                )
+
+                bot.register_next_step_handler(msg, proced_to_check_tests)
+        except Exception as err:
+            print("Photo could not be proccessed!", err)
+
     else:
         msg = bot.send_message(
             message.chat.id,
@@ -303,4 +312,25 @@ def check_tests(message: Message):
         bot.register_next_step_handler(msg, check_tests)
 
 
+def proced_to_check_tests(message: Message):
+    if str(message.text).lower() == "да":
+        msg = bot.send_message(
+            message.chat.id,
+            "Пришлите сюда фотографии заполненных тестов по одному !",
+        )
+
+        bot.register_next_step_handler(msg, check_tests)
+    elif str(message.text).lower() == "нет":
+        test_config.clear()
+        bot.send_message(
+            message.chat.id, "Это все проверенные тесты, которые вы прислали!"
+        )
+    else:
+        msg = bot.send_message(
+            message.chat.id,
+            "Не понял вашего ответа, ответьте да или нет.",
+        )
+
+
+print("bot started")
 bot.infinity_polling()
