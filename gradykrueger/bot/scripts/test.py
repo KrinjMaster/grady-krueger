@@ -10,7 +10,7 @@ from .utils import Test_Config, check_answers, define_correct_answers, proccess_
 def run():
     # start = time.time()
     imgs_path = os.path.join(settings.BASE_DIR.__str__() + "/bot/scripts/")
-    answers_image = cv.imread(imgs_path + "template.jpeg")
+    answers_image = cv.imread(imgs_path + "work3.jpeg")
 
     assert answers_image is not None, "No image found!"
 
@@ -45,13 +45,14 @@ def run():
     )
 
     print(
+        "checked, ",
         correct_answers_count,
         partially_correct_answers_count,
         wrong_answers_count,
     )
 
     cv.imshow("checked", checked_transformed)
-    cv.imshow("checked1", transformed_correct)
+    cv.imshow("correct", transformed_correct)
     cv.waitKey(0)
     cv.destroyAllWindows()
     #

@@ -159,7 +159,6 @@ def proccess_image(
         (_, _, w, h) = cv.boundingRect(c)
         ar = w / float(h)
 
-        # print(w, h, circle_radius / 2, circle_radius * 0.8, ar)
         if (
             w >= circle_radius / 2
             and h >= circle_radius / 2
@@ -174,11 +173,9 @@ def proccess_image(
     # sort answer circles from top-to-bottom left-to-right
     question_cnts = sorted(
         question_cnts,
-        key=lambda ctr: cv.boundingRect(ctr)[0] * 450
+        key=lambda ctr: cv.boundingRect(ctr)[0] * 150
         + cv.boundingRect(ctr)[1] * image.shape[1],
     )
-
-    # print(len(question_cnts), "length")
 
     assert test_config.rows * test_config.columns * test_config.n == len(
         question_cnts
@@ -234,15 +231,7 @@ def define_correct_answers(
             x, y, w, h = cv.boundingRect(answers_by_groups[group_i][cnt_i])
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
-            cv.drawContours(
-                transformed,
-                [answers_by_groups[group_i][cnt_i]],
-                -1,
-                (255, 0, 0),
-                5,
-            )
 
-            # print(bw_ratio)
             if bw_ratio < 2.5:
                 # circle is marked
                 marked_answer |= 1 << (test_config.n - 1 - cnt_i)
@@ -255,9 +244,7 @@ def define_correct_answers(
                     5,
                 )
 
-        print("marked", marked_answer)
         correct_answers.append(marked_answer)
-    print("length", len(correct_answers))
 
     return (transformed, correct_answers)
 
@@ -291,7 +278,7 @@ def check_answers(
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
 
-            if bw_ratio < 2.1:
+            if bw_ratio < 2.5:
                 # circle is marked
                 marked_answer |= 1 << (test_config.n - 1 - cnt_i)
 
@@ -328,21 +315,10 @@ def check_answers(
 
             # on last contor in the group check answered circles
             if cnt_i == test_config.n - 1:
-                print(
-                    True,
-                    test_config.correct_answers[group_i],
-                    marked_answer,
-                )
                 if (
                     test_config.correct_answers[group_i] & marked_answer != 0
                     and marked_answer != 0
                 ):
-                    print(
-                        test_config.correct_answers[group_i] & marked_answer,
-                        test_config.correct_answers[group_i],
-                        marked_answer.bit_count(),
-                        test_config.correct_answers[group_i].bit_count(),
-                    )
                     if (
                         test_config.correct_answers[group_i] & marked_answer
                         == test_config.correct_answers[group_i]
