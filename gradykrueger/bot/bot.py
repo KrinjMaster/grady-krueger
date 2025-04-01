@@ -36,7 +36,7 @@ def send_welcome(message: Message):
     bot.set_chat_menu_button(message.chat.id, MenuButtonCommands("commands"))
     bot.send_message(
         message.chat.id,
-        "Старт или помощь",
+        "Для старта проверки тестов напишите /begin, для создания шаблона - /create_template",
     )
 
 
