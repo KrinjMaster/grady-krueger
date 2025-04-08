@@ -27,7 +27,7 @@ bot.set_my_commands(
 )
 
 
-test_config = Test_Config()
+configs = {}
 
 
 # message handlers
@@ -42,6 +42,7 @@ def send_welcome(message: Message):
 
 @bot.message_handler(commands=["begin"])
 def start_checking(message: Message):
+    configs[message.chat.id] = Test_Config()
     bot.send_message(
         message.chat.id,
         "Вопросы в тесте могут содержать несколько правильных ответов?\nОтвет засчитывается за 0,5 баллов, если пропущен только один ответ.(Да/Нет)",
@@ -52,6 +53,8 @@ def start_checking(message: Message):
 
 @bot.message_handler(commands=["create_template"])
 def create_template(message: Message):
+    configs[message.chat.id] = Test_Config()
+
     bot.send_message(message.chat.id, "Выберите количество колон на листе.")
 
     bot.register_next_step_handler(message, choose_columns)
@@ -59,7 +62,8 @@ def create_template(message: Message):
 
 def choose_is_multiple_answer(message: Message):
     if str(message.text).lower() in ["да", "нет"]:
-        test_config.set_multiple_answer(str(message.text).lower() == "да")
+
+        configs[message.chat.id].set_multiple_answer(str(message.text).lower() == "да")
 
         msg = bot.send_message(message.chat.id, "Выберите количество колон на листе.")
 
@@ -75,7 +79,7 @@ def choose_is_multiple_answer(message: Message):
 
 def choose_columns(message: Message):
     if str(message.text).isnumeric() and int(str(message.text)) > 0:
-        test_config.set_columns(int(str(message.text)))
+        configs[message.chat.id].set_columns(int(str(message.text)))
 
         msg = bot.send_message(message.chat.id, "Выберите количество строк на листе.")
 
@@ -94,7 +98,7 @@ def choose_columns(message: Message):
 
 def choose_rows(message: Message):
     if str(message.text).isnumeric() and int(str(message.text)) > 0:
-        test_config.set_rows(int(str(message.text)))
+        configs[message.chat.id].set_rows(int(str(message.text)))
 
         msg = bot.send_message(
             message.chat.id, "Выберите количество ответов в одном вопросе."
@@ -117,18 +121,21 @@ def choose_answers_quantity(
     message,
 ):
     if str(message.text).isnumeric() and int(str(message.text)) > 0:
-        test_config.set_n(int(str(message.text)))
+        configs[message.chat.id].set_n(int(str(message.text)))
 
         # if is_multiple_answer is None, then user is creating test template and not checking tests
-        if test_config.is_multiple_answer is None:
+        if configs[message.chat.id].is_multiple_answer is None:
             try:
-                test_template = create_test_template(test_config)
+                test_template = create_test_template(configs[message.chat.id])
 
-                cv.imwrite(imgs_path + "test_template.jpg", test_template)
+                cv.imwrite(
+                    imgs_path + str(message.chat.id) + "test_template.jpg",
+                    test_template,
+                )
 
                 bot.send_photo(
                     message.chat.id,
-                    open(imgs_path + "test_template.jpg", "rb"),
+                    open(imgs_path + str(message.chat.id) + "test_template.jpg", "rb"),
                     "Вот ваш шаблон для тестов!",
                 )
 
@@ -139,10 +146,12 @@ def choose_answers_quantity(
                 )
                 print("Something went wrong during creating template!", error)
 
-            if Path(os.path.join(imgs_path + "test_template.jpg")).is_file():
-                os.remove(imgs_path + "test_template.jpg")
+            if Path(
+                os.path.join(imgs_path + str(message.chat.id) + "test_template.jpg")
+            ).is_file():
+                os.remove(imgs_path + str(message.chat.id) + "test_template.jpg")
 
-            test_config.clear()
+            del configs[message.chat.id]
         else:
             msg = bot.send_message(
                 message.chat.id,
@@ -170,26 +179,36 @@ def proccess_correct_answers(message: Message):
             file_info = bot.get_file(file_id)
             downloaded_file = bot.download_file(file_info.file_path)
 
-            f = open(imgs_path + "test_correct_received.jpg", "wb")
+            f = open(
+                imgs_path + str(message.chat.id) + "test_correct_received.jpg", "wb"
+            )
             f.write(downloaded_file)
 
-            answers_image = cv.imread(imgs_path + "test_correct_received.jpg")
+            answers_image = cv.imread(
+                imgs_path + str(message.chat.id) + "test_correct_received.jpg"
+            )
 
             (answers_by_groups, answers_thresh, answers_transformed) = proccess_image(
-                answers_image, test_config
+                answers_image, configs[message.chat.id]
             )
 
             (transformed_correct, correct_answers) = define_correct_answers(
-                answers_by_groups, answers_thresh, answers_transformed, test_config
+                answers_by_groups,
+                answers_thresh,
+                answers_transformed,
+                configs[message.chat.id],
             )
 
-            cv.imwrite(imgs_path + "test_correct.jpg", transformed_correct)
+            cv.imwrite(
+                imgs_path + str(message.chat.id) + "test_correct.jpg",
+                transformed_correct,
+            )
 
-            test_config.set_correct_answers(correct_answers)
+            configs[message.chat.id].set_correct_answers(correct_answers)
 
             msg = bot.send_photo(
                 message.chat.id,
-                open(imgs_path + "test_correct.jpg", "rb"),
+                open(imgs_path + str(message.chat.id) + "test_correct.jpg", "rb"),
                 "Вот правильные ответы на ваш тест! Правильные ли ответы, выделенные зеленым ? (Да/Нет)",
             )
 
@@ -201,11 +220,15 @@ def proccess_correct_answers(message: Message):
             )
             print("Error during image proccesing!")
 
-        if Path(os.path.join(imgs_path + "test_correct.jpg")).is_file():
-            os.remove(imgs_path + "test_correct.jpg")
+        if Path(
+            os.path.join(imgs_path + str(message.chat.id) + "test_correct.jpg")
+        ).is_file():
+            os.remove(imgs_path + str(message.chat.id) + "test_correct.jpg")
 
-        if Path(os.path.join(imgs_path + "test_correct_received.jpg")).is_file():
-            os.remove(imgs_path + "test_correct_received.jpg")
+        if Path(
+            os.path.join(imgs_path + str(message.chat.id) + "test_correct_received.jpg")
+        ).is_file():
+            os.remove(imgs_path + str(message.chat.id) + "test_correct_received.jpg")
 
     else:
         bot.send_message(
@@ -249,24 +272,28 @@ def confirm_test_answers(message: Message):
 def check_tests(message: Message):
     if (
         message.photo is not None
-        and test_config.rows is not None
-        and test_config.columns is not None
+        and configs[message.chat.id].rows is not None
+        and configs[message.chat.id].columns is not None
     ):
         try:
-            if len(test_config.correct_answers) > 0:
+            if len(configs[message.chat.id].correct_answers) > 0:
                 file_info = bot.get_file(message.photo[-1].file_id)
                 file = bot.download_file(file_info.file_path)
 
-                f = open(imgs_path + "test_marked_received.jpg", "wb")
+                f = open(
+                    imgs_path + str(message.chat.id) + "test_marked_received.jpg", "wb"
+                )
                 f.write(file)
 
-                marked_answers_image = cv.imread(imgs_path + "test_marked_received.jpg")
+                marked_answers_image = cv.imread(
+                    imgs_path + str(message.chat.id) + "test_marked_received.jpg"
+                )
 
                 (
                     marked_answers_by_groups,
                     marked_answered_thresh,
                     marked_answered_transformed,
-                ) = proccess_image(marked_answers_image, test_config)
+                ) = proccess_image(marked_answers_image, configs[message.chat.id])
 
                 (
                     correct_answers_count,
@@ -277,22 +304,33 @@ def check_tests(message: Message):
                     marked_answered_thresh,
                     marked_answered_transformed,
                     marked_answers_by_groups,
-                    test_config,
+                    configs[message.chat.id],
                 )
 
-                cv.imwrite(imgs_path + "test_checked.jpg", checked_transformed)
+                cv.imwrite(
+                    imgs_path + str(message.chat.id) + "test_checked.jpg",
+                    checked_transformed,
+                )
 
                 bot.send_photo(
                     message.chat.id,
-                    open(imgs_path + "test_checked.jpg", "rb"),
-                    f"Вот проверенный тест!\nВсего правильных баллов: {correct_answers_count + partially_correct_answers_count * 0.5}/{test_config.columns * test_config.rows}\nКоличество полностью правильных ответов: {correct_answers_count}\nКоличество частисно правильных ответов: {partially_correct_answers_count}\nКоличество неправильных ответов: {wrong_answers_count}\nЗелёным отмечены те ответы, которые были отвечены правильно. Синим отмечены те ответы, которые являются правильными, но ученик пропустил. Красным отмечены ответы, которые ученик отметил неправильно.",
+                    open(imgs_path + str(message.chat.id) + "test_checked.jpg", "rb"),
+                    f"Вот проверенный тест!\nВсего правильных баллов: {correct_answers_count + partially_correct_answers_count * 0.5}/{configs[message.chat.id].columns * configs[message.chat.id].rows}\nКоличество полностью правильных ответов: {correct_answers_count}\nКоличество частисно правильных ответов: {partially_correct_answers_count}\nКоличество неправильных ответов: {wrong_answers_count}\nЗелёным отмечены те ответы, которые были отвечены правильно. Синим отмечены те ответы, которые являются правильными, но ученик пропустил. Красным отмечены ответы, которые ученик отметил неправильно.",
                 )
 
-                if Path(os.path.join(imgs_path + "test_checked.jpg")).is_file():
-                    os.remove(imgs_path + "test_checked.jpg")
+                if Path(
+                    os.path.join(imgs_path + str(message.chat.id) + "test_checked.jpg")
+                ).is_file():
+                    os.remove(imgs_path + str(message.chat.id) + "test_checked.jpg")
 
-                if Path(os.path.join(imgs_path + "test_marked_received.jpg")).is_file():
-                    os.remove(imgs_path + "test_marked_received.jpg")
+                if Path(
+                    os.path.join(
+                        imgs_path + str(message.chat.id) + "test_marked_received.jpg"
+                    )
+                ).is_file():
+                    os.remove(
+                        imgs_path + str(message.chat.id) + "test_marked_received.jpg"
+                    )
 
                 msg = bot.send_message(
                     message.chat.id,
@@ -321,7 +359,7 @@ def proced_to_check_tests(message: Message):
 
         bot.register_next_step_handler(msg, check_tests)
     elif str(message.text).lower() == "нет":
-        test_config.clear()
+        del configs[message.chat.id]
         bot.send_message(
             message.chat.id, "Это все проверенные тесты, которые вы прислали!"
         )
