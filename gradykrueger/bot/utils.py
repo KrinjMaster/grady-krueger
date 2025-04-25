@@ -55,7 +55,6 @@ def proccess_image(
     image, test_config: Test_Config
 ) -> tuple[list[int], MatLike, MatLike]:
     if test_config.rows is None or test_config.columns is None or test_config.n is None:
-        # TODO
         raise Exception("")
 
     image = cv.resize(image, (905, 1280))
@@ -66,61 +65,71 @@ def proccess_image(
     edged = cv.Canny(blurred, 5, 100)
 
     # countors
-    cnts, _ = cv.findContours(edged.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    cnts, _ = cv.findContours(edged.copy(), cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE)
     cv.drawContours(edged, cnts, -1, (255, 255, 255), 3)
-    cnts, _ = cv.findContours(edged.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    cnts, hier = cv.findContours(edged.copy(), cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE)
 
     countor = None
     max_perimeter = 0
 
     # determining countor of a sheet of paper
-    for c in cnts:
-        perimeter = cv.arcLength(c, True)
-        approx = cv.approxPolyDP(c, 0.04 * perimeter, True)
+    for c_i in range(len(cnts)):
+        perimeter = cv.arcLength(cnts[c_i], True)
+        approx = cv.approxPolyDP(cnts[c_i], 0.04 * perimeter, True)
 
-        if len(approx) == 4 and max_perimeter < perimeter:
+        if len(approx) == 4 and max_perimeter < perimeter and hier[0][c_i][0] != -1:
             max_perimeter = perimeter
             countor = approx
 
     assert countor is not None, "No paper found!"
+    # print("1")
 
     # four point transformation
     transformed = perspective.four_point_transform(image, countor.reshape(4, 2))
     transformed_gray = cv.cvtColor(transformed, cv.COLOR_BGR2GRAY)
     transformed_blurred = cv.GaussianBlur(transformed_gray, (9, 5), 0)
 
-    # to black and white
-    threshold = np.average(transformed_blurred)
+    rgb_planes = cv.split(transformed_blurred)
 
-    _, thresh = cv.threshold(transformed_blurred, threshold, 255, cv.THRESH_BINARY)
+    result_planes = []
+    result_norm_planes = []
+
+    for plane in rgb_planes:
+        dilated_img = cv.dilate(plane, np.ones((7, 7), np.uint8))
+        bg_img = cv.medianBlur(dilated_img, 21)
+        diff_img = 255 - cv.absdiff(plane, bg_img)
+        norm_img = cv.normalize(
+            diff_img,
+            None,
+            alpha=0,
+            beta=255,
+            norm_type=cv.NORM_MINMAX,
+            dtype=cv.CV_8UC1,
+        )
+        result_planes.append(diff_img)
+        result_norm_planes.append(norm_img)
+
+    result = cv.merge(result_planes)
+    # result_norm = cv.merge(result_norm_planes)
+
+    # to black and white
+    edged_transformed = cv.Canny(result, 5, 100)
+    edged_blurred = cv.GaussianBlur(edged_transformed, (1, 5), 0)
+
+    threshold = np.average(edged_blurred)
+
+    _, thresh = cv.threshold(edged_blurred, threshold, 255, cv.THRESH_BINARY)
 
     # contors again
-    paper_cnts, paper_hier = cv.findContours(
-        thresh.copy(), cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE
-    )
+    # kernel = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
+    # thresh = cv.morphologyEx(thresh, cv.MORPH_CLOSE, kernel)
+    # thresh = cv.dilate(thresh, kernel, iterations=1)
 
-    filtered_cnts = []
+    # TODO: for some reason still does not filter out inner cirles
 
-    threshold = 0
-    most_occuring_count = 0
+    paper_cnts, _ = cv.findContours(thresh, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE)
 
-    occurence_frequency = {}
-
-    # get the most occuring outer contor
-    for i in range(len(paper_hier)):
-        if occurence_frequency.get(paper_hier[:, i][0][3]) is not None:
-            occurence_frequency[paper_hier[:, i][0][3]] += 1
-        else:
-            occurence_frequency[paper_hier[:, i][0][3]] = 0
-
-        if occurence_frequency[paper_hier[:, i][0][3]] > most_occuring_count:
-            threshold = paper_hier[:, i][0][3]
-            most_occuring_count = occurence_frequency[paper_hier[:, i][0][3]]
-
-    # get all of the outer contors
-    for index in range(len(paper_cnts)):
-        if paper_hier[:, index][0][3] > threshold - 1:
-            filtered_cnts.append(paper_cnts[index])
+    filtered_cnts = paper_cnts
 
     # define answer question radius
     row_spacing = 10
@@ -158,14 +167,13 @@ def proccess_image(
         M = cv.moments(c)
         (_, _, w, h) = cv.boundingRect(c)
         ar = w / float(h)
-
         if (
-            w >= circle_radius / 2
-            and h >= circle_radius / 2
+            w >= circle_radius / 2.7
+            and h >= circle_radius / 2.7
             and w <= circle_radius * 0.8
             and h <= circle_radius * 0.8
-            and ar >= 0.9
-            and ar <= 1.1
+            and ar >= 0.8
+            and ar <= 1.2
             and M["m00"] != 0
         ):
             question_cnts.append(c)
@@ -177,9 +185,34 @@ def proccess_image(
         + cv.boundingRect(ctr)[1] * image.shape[1],
     )
 
+    print(
+        "2", test_config.rows * test_config.columns * test_config.n, len(question_cnts)
+    )
+
+    # if len(question_cnts) == 2 * (
+    #     test_config.rows * test_config.columns * test_config.n
+    # ):
+    #     question_cnts = question_cnts[::2]
+    if len(question_cnts) != test_config.rows * test_config.columns * test_config.n:
+        question_cnts = question_cnts[::2]
+        # question_cnts = question_cnts[
+        #     : test_config.rows * test_config.columns * test_config.n
+        # ]
+
+    # elif len(question_cnts) > test_config.rows * test_config.columns * test_config.n:
+    #     question_cnts = question_cnts[
+    #         : test_config.rows * test_config.columns * test_config.n
+    #     ]
+
+    # cv.drawContours(transformed, question_cnts, -1, (0, 255, 0), 1)
+    # cv.imshow("transformed", thresh)
+    # cv.imshow("transformed1", transformed)
+    # cv.imshow("thresh", thresh)
+    # cv.waitKey(0)
     assert test_config.rows * test_config.columns * test_config.n == len(
         question_cnts
     ), "Wrong number of questions found!"
+    # print("3")
 
     # iterate and group circle contors by questions
     answers_by_groups = []
@@ -189,15 +222,18 @@ def proccess_image(
     cur_n = 0
     cur_group = []
 
-    for i in range(len(question_cnts) + 1):
-        if cur_row <= test_config.rows - 1:
+    # print("4")
+    for i in range(len(question_cnts) + test_config.columns):
+        if cur_row < test_config.rows:
             cur_group.append(
                 question_cnts[
-                    test_config.columns * test_config.n * cur_row + cur_n + factor * 3
+                    test_config.columns * test_config.n * cur_row
+                    + cur_n
+                    + factor * test_config.n
                 ]
             )
 
-            if cur_n + 1 == 3:
+            if cur_n + 1 == test_config.n:
                 answers_by_groups.append(cur_group)
                 cur_group = []
                 cur_n = 0
@@ -209,6 +245,8 @@ def proccess_image(
             cur_n = 0
             cur_row = 0
             factor += 1
+
+    # print("5")
 
     return (answers_by_groups, thresh, transformed)
 
@@ -223,6 +261,19 @@ def define_correct_answers(
 
     correct_answers = []
 
+    transformed_final = transformed.copy()
+
+    bw_sum = 0
+
+    for group_i in range(test_config.rows * test_config.columns):
+        for cnt_i in range(test_config.n):
+            x, y, w, h = cv.boundingRect(answers_by_groups[group_i][cnt_i])
+            ROI = thresh[y : y + h, x : x + w]
+            bw_sum += np.sum(ROI == 255) / np.sum(ROI == 0)
+
+    bw_thresh = bw_sum / (test_config.rows * test_config.columns * test_config.n)
+
+    # print(bw_thresh)
     # iterate over contours, check if content inside is filled or not (black and white ratio)
     for group_i in range(test_config.rows * test_config.columns):
         marked_answer = 0
@@ -232,12 +283,14 @@ def define_correct_answers(
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
 
-            if bw_ratio < 2.5:
+            # print(bw_ratio)
+
+            if bw_ratio > bw_thresh:
                 # circle is marked
                 marked_answer |= 1 << (test_config.n - 1 - cnt_i)
 
                 cv.drawContours(
-                    transformed,
+                    transformed_final,
                     [answers_by_groups[group_i][cnt_i]],
                     -1,
                     (0, 255, 0),
@@ -246,7 +299,7 @@ def define_correct_answers(
 
         correct_answers.append(marked_answer)
 
-    return (transformed, correct_answers)
+    return (transformed_final, correct_answers)
 
 
 # check the test occording to given answers
@@ -256,6 +309,7 @@ def check_answers(
     answers_by_groups,
     test_config,
 ) -> tuple[int, int, int, MatLike]:
+    transformed_final = transformed.copy()
     if (
         test_config.rows is None
         or test_config.columns is None
@@ -269,7 +323,18 @@ def check_answers(
     partially_correct_answers_count = 0
     wrong_answers_count = 0
 
-    # this loop only for drawing correct, incorrect and partially correct answers contors
+    bw_sum = 0
+
+    for group_i in range(test_config.rows * test_config.columns):
+        for cnt_i in range(test_config.n):
+            x, y, w, h = cv.boundingRect(answers_by_groups[group_i][cnt_i])
+            ROI = thresh[y : y + h, x : x + w]
+            bw_sum += np.sum(ROI == 255) / np.sum(ROI == 0)
+
+    bw_thresh = bw_sum / (test_config.rows * test_config.columns * test_config.n)
+
+    # print(bw_thresh)
+    # iterate over contours, check if content inside is filled or not (black and white ratio)
     for group_i in range(test_config.rows * test_config.columns):
         marked_answer = 0
 
@@ -278,7 +343,9 @@ def check_answers(
             ROI = thresh[y : y + h, x : x + w]
             bw_ratio = np.sum(ROI == 255) / np.sum(ROI == 0)
 
-            if bw_ratio < 2.5:
+            # print(bw_ratio)
+
+            if bw_ratio > bw_thresh:
                 # circle is marked
                 marked_answer |= 1 << (test_config.n - 1 - cnt_i)
 
@@ -289,20 +356,20 @@ def check_answers(
                 ):
                     # circle is marked correctly
                     cv.drawContours(
-                        transformed,
+                        transformed_final,
                         [answers_by_groups[group_i][cnt_i]],
                         -1,
                         (0, 255, 0),
-                        5,
+                        2,
                     )
                 else:
                     # circle is marked incorrectly
                     cv.drawContours(
-                        transformed,
+                        transformed_final,
                         [answers_by_groups[group_i][cnt_i]],
                         -1,
                         (0, 0, 255),
-                        5,
+                        2,
                     )
             elif (
                 1 << (test_config.n - 1 - cnt_i) & test_config.correct_answers[group_i]
@@ -310,7 +377,11 @@ def check_answers(
             ):
                 # circle is not marked, but correct
                 cv.drawContours(
-                    transformed, [answers_by_groups[group_i][cnt_i]], -1, (255, 0, 0), 5
+                    transformed_final,
+                    [answers_by_groups[group_i][cnt_i]],
+                    -1,
+                    (255, 0, 0),
+                    2,
                 )
 
             # on last contor in the group check answered circles
@@ -353,7 +424,7 @@ def check_answers(
         correct_answers_count,
         partially_correct_answers_count,
         wrong_answers_count,
-        transformed,
+        transformed_final,
     )
 
 

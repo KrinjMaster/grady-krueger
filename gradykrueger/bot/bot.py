@@ -11,6 +11,7 @@ from .utils import *
 
 bot = TeleBot(settings.BOT_TOKEN)
 imgs_path = os.path.join(settings.BASE_DIR.__str__() + "/bot/imgs/")
+Path(imgs_path).mkdir(parents=True, exist_ok=True)
 
 # menu commands
 start_command = BotCommand(command="start", description="Старт бота")
@@ -180,12 +181,21 @@ def proccess_correct_answers(message: Message):
             downloaded_file = bot.download_file(file_info.file_path)
 
             f = open(
-                imgs_path + str(message.chat.id) + "test_correct_received.jpg", "wb"
+                imgs_path
+                + "botbotbot"
+                + str(message.chat.id)
+                + "test_correct_received.jpg",
+                "wb+",
             )
+
             f.write(downloaded_file)
+            f.close()
 
             answers_image = cv.imread(
-                imgs_path + str(message.chat.id) + "test_correct_received.jpg"
+                imgs_path
+                + "botbotbot"
+                + str(message.chat.id)
+                + "test_correct_received.jpg",
             )
 
             (answers_by_groups, answers_thresh, answers_transformed) = proccess_image(
@@ -213,7 +223,8 @@ def proccess_correct_answers(message: Message):
             )
 
             bot.register_next_step_handler(msg, confirm_test_answers)
-        except:
+        except Exception as err:
+            print(err)
             bot.send_message(
                 message.chat.id,
                 "Во время обработки изображения произошла ошибка! Попробуйте снова.",
