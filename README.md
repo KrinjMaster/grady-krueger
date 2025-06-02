@@ -22,3 +22,5 @@ For that just install Python3, pip and clone this git repo. After you've done it
 ```
 pip install -r requirements.txt
 ```
+
+[Video Demonstration](https://drive.google.com/file/d/1LdS-mt8ELBEq3FKUHKhWqfTWSNXGg6ZP/view?usp=sharing)
